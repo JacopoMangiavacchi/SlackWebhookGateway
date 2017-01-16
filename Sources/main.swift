@@ -7,9 +7,18 @@ var _channel = ""
 class SlackWebhookGateway: MessageEventsDelegate {
     let client: SlackClient
     
+    let serialQueueSlack = DispatchQueue(label: "SlackQueue", qos: .background, attributes: [], autoreleaseFrequency: .inherit, target: nil)
+
+
     init(token: String) {
         client = SlackClient(apiToken: token)
-        client.messageEventsDelegate = self
+
+        serialQueueSlack.async(execute: {
+            self.client.messageEventsDelegate = self
+            self.client.connect()
+        })
+
+        //client.messageEventsDelegate = self
     }
     
     // MARK: MessageEventsDelegate
@@ -38,28 +47,34 @@ class SlackWebhookGateway: MessageEventsDelegate {
     }
 }
 
-
 let slackbot = SlackWebhookGateway(token: Configuration.slackBotToken)
 
-let log = LogMiddleware()
+let serialQueueServer = DispatchQueue(label: "ServerQueue", qos: .background, attributes: [], autoreleaseFrequency: .inherit, target: nil)
 
-let router = BasicRouter { route in
-    route.get("/responde") { request in
-        slackbot.client.webAPI.sendMessage(channel: _channel, text: "Botson Response2", username: nil, asUser: nil, parse: nil, linkNames: nil,
-                                           attachments: nil, unfurlLinks: nil, unfurlMedia: nil, iconURL: nil, iconEmoji: nil,
-                                           success: nil, failure: nil)
-        
-        
-        return Response(body: "Responding to Slack!")
+serialQueueServer.async {
+    let log = LogMiddleware()
+
+    let router = BasicRouter { route in
+        route.get("/responde") { request in
+            slackbot.client.webAPI.sendMessage(channel: _channel, text: "Botson Response2", username: nil, asUser: nil, parse: nil, linkNames: nil,
+                                               attachments: nil, unfurlLinks: nil, unfurlMedia: nil, iconURL: nil, iconEmoji: nil,
+                                               success: nil, failure: nil)
+            
+            
+            return Response(body: "Responding to Slack!")
+        }
+    }
+
+    do {
+        let server = try Server(port: 8080, middleware: [log], responder: router)
+        try server.start()
+    }
+    catch {
+        print("error")
     }
 }
-let server = try Server(port: 8080, middleware: [log], responder: router)
 
-let serialQueue = DispatchQueue(label: "SlackQueue", qos: .background, attributes: [], autoreleaseFrequency: .inherit, target: nil)
 
-serialQueue.async {
-    slackbot.client.connect()
-}
+RunLoop.main.run()
 
-try server.start()
 
